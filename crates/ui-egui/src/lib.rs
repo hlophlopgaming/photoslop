@@ -827,6 +827,10 @@ impl eframe::App for PhotocraftApp {
         } else {
             self.fonts_ready = true;
         }
+        #[cfg(target_os = "linux")]
+        if self.frame == 0 {
+            gpu_status::configure_presentation(_frame);
+        }
         self.frame += 1;
         let now = ctx.input(|i| i.time);
         let dt = (now - self.last_frame_time) as f32;

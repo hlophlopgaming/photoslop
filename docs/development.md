@@ -44,6 +44,12 @@ CRAFT_FONTS_DIR="$PWD/../craft-fonts" cargo test --workspace     # runs the Japa
 
 If the device is lost while running (#243), every GPU entry point checks the device's health flag first, the canvas switches to the CPU compositor for the rest of the session and a notice says "GPU device was lost; using the CPU renderer." `ui.gpu.simulateLoss` triggers this path from the control channel.
 
+On Linux, the window prefers Mailbox presentation when the window surface supports it,
+so a newer completed frame replaces a queued frame instead of waiting behind it. Other
+surfaces retain eframe's low-latency VSync configuration. This is selected once at startup;
+no Mesa environment override is needed. It reduces presentation backlog, not the display's
+physical refresh interval or tablet sampling delay.
+
 ## Environment variables
 
 | Variable | Effect |

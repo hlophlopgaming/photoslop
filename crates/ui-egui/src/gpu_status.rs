@@ -8,6 +8,28 @@ use serde_json::json;
 
 use crate::PhotocraftApp;
 
+/// Prefer the newest completed frame over a FIFO backlog when the surface supports it.
+#[cfg(target_os = "linux")]
+fn presentation_config(mut current: eframe::SurfaceConfig, supported: &[eframe::wgpu::PresentMode]) -> eframe::SurfaceConfig {
+    if supported.contains(&eframe::wgpu::PresentMode::Mailbox) {
+        current.present_mode = eframe::wgpu::PresentMode::Mailbox;
+    }
+    current
+}
+
+/// Query this window's capabilities once; never request an unsupported present mode.
+#[cfg(target_os = "linux")]
+pub fn configure_presentation(frame: &mut eframe::Frame) {
+    let (Some(state), Some(window), Some(current)) = (frame.wgpu_render_state(), frame.winit_window(), frame.wgpu_surface_config()) else { return };
+    // This temporary surface is only a capability query, with no swapchain or rendering.
+    let Ok(surface) = state.instance.create_surface(window.clone()) else { return };
+    let supported = surface.get_capabilities(&state.adapter).present_modes;
+    let config = presentation_config(current, &supported);
+    drop(surface);
+    frame.set_wgpu_surface_config(config);
+    eprintln!("photocraft: window presentation: {:?}", config.present_mode);
+}
+
 /// Notice title when the device was lost.
 pub const LOST_MESSAGE: &str = "GPU device was lost; using the CPU renderer.";
 /// Notice title when the device reported an error (out of memory, validation, internal).
@@ -144,6 +166,19 @@ pub fn show_fallback(app: &mut PhotocraftApp, ctx: &egui::Context) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn mailbox_requires_surface_support_and_keeps_the_latency_limit() {
+        use eframe::wgpu::PresentMode;
+        let current = eframe::SurfaceConfig::LOW_LATENCY;
+        for supported in [vec![], vec![PresentMode::Fifo], vec![PresentMode::Immediate, PresentMode::Fifo]] {
+            assert_eq!(presentation_config(current, &supported), current);
+        }
+        let selected = presentation_config(current, &[PresentMode::Fifo, PresentMode::Mailbox]);
+        assert_eq!(selected.present_mode, PresentMode::Mailbox);
+        assert_eq!(selected.desired_maximum_frame_latency, current.desired_maximum_frame_latency);
+    }
 
     #[test]
     fn fallback_warning_keeps_reason_in_inspectable_state() {
