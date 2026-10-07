@@ -109,26 +109,100 @@ Requirements: a clean working tree, `gh auth login` done once, and the build dep
 ## Development
 
 ```sh
-cargo test -p photocraft-ui-egui
-cargo xtask layers
-cargo xtask wasm
+pkg install libxkbcommon wayland libX11 libXcursor libXrandr libXi libxcb mesa-libs vulkan-loader gtk3 fontconfig freetype2 alsa-lib
+tar -xzf photocraft-<version>-freebsd-x86_64.tar.gz --strip-components 1 -C /usr/local
+photocraft
 ```
 
-- [Architecture and workspace layout](docs/architecture.md)
-- [Contributing rules](docs/contributing.md)
-- [Driving the app and taking screenshots](docs/control-protocol.md)
-- [UI design](docs/ui-design.md)
-- [Upstream roadmap](docs/roadmap.md)
+Maintainers: [`docs/releasing.md`](docs/releasing.md) explains how releases are built, signed and published.
 
-When reporting a bug, include your distro, Wayland compositor or X11, GPU, tablet model (for pen
-issues), steps to reproduce, and the document size.
+> [!IMPORTANT]
+> **Status:** PhotoCraft is in early alpha, and we want to be straight about where it stands: much of Photoshop's feature surface exists in some form, but **it is not yet a Photoshop replacement for daily professional work**. The biggest gaps are AI/generative features, about twenty missing tools, depth in typography and pro workflows, and plug-in compatibility. Every Photoshop menu item is wired to a command ([`docs/parity.md`](docs/parity.md)), but that measures wiring, not behaviour. The honest, dimension-by-dimension picture and where we're going next are in the [roadmap's parity assessment](docs/roadmap.md#honest-parity-assessment-2026-10-05). Expect rough edges, and please file issues (include your OS, document size, layer count and a screenshot). You can also tell us what broke on [Discord](https://discord.gg/artcraft).
 
-## Origin and license
+## Documentation
 
-Photoslop is a fork of the [original PhotoCraft](https://github.com/storytold/photocraft).
-Upstream's proprietary logos and promotional links have been removed; the new Photoslop logo lives
-in [`new_redesign/`](new_redesign).
+Developer, architecture, automation, format, and security documentation is maintained in the [PhotoCraft documentation book](book/).
 
-The code is available under [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option.
-Upstream copyright notices are kept in [NOTICE](NOTICE) and the license files. Other assets are
-listed in [ATTRIBUTION.md](ATTRIBUTION.md).
+## Security
+
+Security architecture, threat modeling, parser hardening, fuzzing, and vulnerability reporting are covered in the [security documentation](book/src/security/) and the repository [security policy](SECURITY.md).
+
+## Test corpora
+
+PhotoCraft is tested against real files: our own Photoshop-authored oracle PSDs in
+[photocraft-corpus](https://github.com/storytold/photocraft-corpus) plus the psd-tools, ag-psd and PngSuite sets, pinned and
+sha256-verified. Fetch them with `cargo xtask corpus --all` and run the tests with
+`cargo xtask test-corpus` (details in [docs/development.md](docs/development.md#test-corpora)).
+
+## The Crafting Apps
+
+PhotoCraft is one of the **Crafting Apps**: free, open-source creative tools from the
+[ArtCraft](https://getartcraft.com/) team, each written from scratch in Rust and each able to
+stand on its own.
+
+| | App | What it's for | Code | Learn more |
+|:-:|---|---|---|---|
+| <img src="https://raw.githubusercontent.com/storytold/photocraft/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.photocraft.png" alt="" width="32" height="32"> | **PhotoCraft** | **Image editing: layers, masks, type and real PSD files · you are here** | [GitHub](https://github.com/storytold/photocraft) | [Website](https://getartcraft.com/apps/photocraft) |
+| <img src="https://raw.githubusercontent.com/storytold/vectorcraft/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.vectorcraft.png" alt="" width="32" height="32"> | **VectorCraft** | Vector illustration | [GitHub](https://github.com/storytold/vectorcraft) | [Website](https://getartcraft.com/apps/vectorcraft) |
+| <img src="https://raw.githubusercontent.com/storytold/filmcraft/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.filmcraft.png" alt="" width="32" height="32"> | **FilmCraft** | Video editing, color and sound | [GitHub](https://github.com/storytold/filmcraft) | [Website](https://getartcraft.com/apps/filmcraft) |
+| <img src="https://raw.githubusercontent.com/storytold/lightcraft/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.lightcraft.png" alt="" width="32" height="32"> | **LightCraft** | Photo library and raw development | [GitHub](https://github.com/storytold/lightcraft) | [Website](https://getartcraft.com/apps/lightcraft) |
+| <img src="https://raw.githubusercontent.com/storytold/printcraft/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.printcraft.png" alt="" width="32" height="32"> | **PrintCraft** | Reading, organizing and protecting PDFs | [GitHub](https://github.com/storytold/printcraft) | [Website](https://getartcraft.com/apps/printcraft) |
+| <img src="https://raw.githubusercontent.com/storytold/effectcraft/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.effectcraft.png" alt="" width="32" height="32"> | **EffectCraft** | Motion graphics and visual effects | [GitHub](https://github.com/storytold/effectcraft) | [Website](https://getartcraft.com/apps/effectcraft) |
+| <img src="https://raw.githubusercontent.com/storytold/designcraft/main/assets/app-icon/hicolor/64x64/apps/ai.storyteller.designcraft.png" alt="" width="32" height="32"> | **DesignCraft** | Page layout and publishing | [GitHub](https://github.com/storytold/designcraft) | [Website](https://getartcraft.com/apps/designcraft) |
+
+And [**ArtCraft**](https://getartcraft.com/) itself, our AI image and video studio for artists who want real control.
+
+The Crafting Apps share the same conventions: clean-room and pure Rust, native on macOS, Windows and Linux, in the browser via WebAssembly, and fully drivable by agents.
+
+<br>
+
+<p align="center">
+  <a href="https://discord.gg/artcraft"><img alt="Join the ArtCraft community on Discord" src="https://img.shields.io/badge/Join%20us%20on%20Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" height="40"></a>
+</p>
+
+<h3 align="center">Come make things with us</h3>
+
+<p align="center">
+  Our Discord is where artists of every kind hang out: people who paint, shoot, draw, cut film,
+  set type, and people still figuring out what they like to make. Share what you're working on,
+  ask for help, tell us what's broken, or tell us what you wish these tools could do.
+  Whatever your medium and however long you've been at it, you're welcome here.
+</p>
+
+<p align="center">
+  <a href="https://discord.gg/artcraft"><b>discord.gg/artcraft</b></a> ·
+  <a href="https://getartcraft.com/">getartcraft.com</a> ·
+  <a href="https://getartcraft.com/apps">The Crafting Apps</a> ·
+  <a href="https://getartcraft.com/apps/photocraft">PhotoCraft</a>
+</p>
+
+---
+
+## License and credits
+
+PhotoCraft is dual-licensed under [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option.
+Copyright (c) 2026 ArtCraft Team and the PhotoCraft contributors. Required notices are in [NOTICE](NOTICE).
+
+Bundled fonts, icons, images and other assets keep their own open licenses; each one is listed
+with its author, source and license in [ATTRIBUTION.md](ATTRIBUTION.md).
+
+Every artwork shown is in the public domain (Wikimedia Commons, NASA, U.S. National Archives); sources are listed in [`docs/images/SOURCES.md`](docs/images/SOURCES.md).
+
+The ArtCraft name, wordmark and logos in [`docs/brand/`](docs/brand/) are trademarks of the
+ArtCraft Team and are not covered by this license. They may be used only unmodified, and only as
+part of this repository and PhotoCraft, under [`docs/brand/LICENSE-brand.txt`](docs/brand/LICENSE-brand.txt).
+Forks and modified versions must remove them.
+
+<sub>Adobe, Photoshop, Illustrator, Premiere Pro, Lightroom, Acrobat, After Effects and InDesign are trademarks or registered trademarks of Adobe Inc. in the United States and/or other countries. PhotoCraft is an independent, open-source project and is not affiliated with, sponsored by or endorsed by Adobe Inc.; these names are used only to describe the workflows it is compatible with.</sub>
+
+<p align="center">
+  <a href="https://getartcraft.com/"><img alt="ArtCraft" src="docs/brand/artcraft-mark.svg" width="28"></a><br>
+  <sub>Made by the <a href="https://getartcraft.com/">ArtCraft</a> team and community.</sub>
+</p>
+
+
+ArtCraft
+
+## Star history
+
+[![Star History Chart](https://api.star-history.com/svg?repos=storytold/photocraft&type=Date&legend=top-left)](https://www.star-history.com/?repos=storytold%2Fphotocraft&type=date&legend=top-left)
