@@ -274,6 +274,8 @@ flatpak install --user photocraft-<version>-linux-x86_64.flatpak   # or -linux-a
 flatpak run ai.storyteller.photocraft
 ```
 
+Pen tablets on Linux: on a Wayland session with a tablet connected, PhotoCraft runs its window under Xwayland, which reports pen pressure, tilt and the eraser end (native Wayland pen input is not supported yet, and KDE Plasma 6.3+ no longer passes the pen to such windows at all). Set `PHOTOCRAFT_DISPLAY=wayland` to keep the native Wayland window, or `PHOTOCRAFT_DISPLAY=x11` to always use Xwayland.
+
 On macOS, the command-line tool comes as `photocraft-cli-<version>-macos-universal.zip`. The binary is signed with the same Developer ID as the app and notarized by Apple. A bare binary can't carry a stapled notarization ticket the way the DMG does, so the first time you run it macOS checks the notarization online. You can confirm it yourself:
 
 ```sh

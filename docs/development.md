@@ -53,6 +53,8 @@ If the device is lost while running (#243), every GPU entry point checks the dev
 | `PHOTOCRAFT_CONTROL_TOKEN_FILE` | Read, or create for a server, the control bearer-token file |
 | `PHOTOCRAFT_AUTOMATION_READ_ROOT` | Directory capability for automation reads; requests use relative paths |
 | `PHOTOCRAFT_AUTOMATION_WRITE_ROOT` | Separate directory capability for automation writes; requests use relative paths |
+| `PHOTOCRAFT_DISPLAY=auto` | Linux: `auto` (default) runs the window under Xwayland on a Wayland session when Xwayland reports a pen tablet (winit has no Wayland tablet input, and KWin 6.3+ no longer turns the pen into a pointer); `wayland` keeps native Wayland; `x11` always uses X11/Xwayland |
+| `PHOTOCRAFT_TABLET_DEBUG=1` | Print the pen devices found and every pen sample (pressure, tilt, eraser) to stderr |
 | `PHOTOCRAFT_CPU_CANVAS=1` | Force the CPU canvas path instead of the wgpu shader canvas |
 | `WGPU_BACKEND=dx12` | Pick the wgpu backend(s) (`vulkan`, `dx12`, `metal`, `gl`); overrides `performance.gpuBackend` and the startup fallback |
 | `PHOTOCRAFT_GPU_TILE=2048` | Force GPU canvas tiling (tests tile seams) |

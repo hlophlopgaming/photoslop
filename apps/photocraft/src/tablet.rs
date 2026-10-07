@@ -4,7 +4,9 @@
 //! local event monitor; XInput2 raw events on a second X connection) and this module writes each
 //! sample into the UI's [`StylusFeed`], where the canvas reads it exactly like the web runner's
 //! Pointer Events and automation's simulated pen. Windows needs nothing here: winit forwards
-//! `WM_POINTER` pressure as touch force. Wayland has no tablet input yet (see the crate docs).
+//! `WM_POINTER` pressure as touch force. Wayland has no tablet input yet (see the crate docs), so
+//! on a Wayland session with a pen the window runs under Xwayland (`display_choice`).
+//! `PHOTOCRAFT_TABLET_DEBUG=1` prints the pen devices found and every sample to stderr.
 
 use photocraft_tablet::Sample;
 use photocraft_ui_egui::stylus::{PenSample, StylusFeed};
@@ -14,9 +16,21 @@ pub fn pen_sample(s: Sample) -> PenSample {
     PenSample { pressure: s.pressure, tilt_x: s.tilt_x, tilt_y: s.tilt_y, rotation: s.rotation, eraser: s.eraser }.sanitized()
 }
 
-/// Writes tablet samples into `feed` (`None` = a mouse).
+/// Writes tablet samples into `feed` (`None` = a mouse). With `PHOTOCRAFT_TABLET_DEBUG=1` each
+/// sample is also printed to stderr, to see what a tablet actually reports.
 pub fn sink(feed: StylusFeed) -> impl Fn(Option<Sample>) + Send + 'static {
-    move |s| feed.set(s.map(pen_sample))
+    let debug = debug_enabled();
+    move |s| {
+        if debug {
+            eprintln!("photocraft tablet: {s:?}");
+        }
+        feed.set(s.map(pen_sample))
+    }
+}
+
+/// `PHOTOCRAFT_TABLET_DEBUG` is set (and not `0`).
+pub fn debug_enabled() -> bool {
+    std::env::var_os("PHOTOCRAFT_TABLET_DEBUG").is_some_and(|v| !v.is_empty() && v != "0")
 }
 
 /// Install the AppKit tablet monitor (main thread, before the event loop). Keep the result until
@@ -26,17 +40,40 @@ pub fn install_macos(feed: &StylusFeed) -> Option<photocraft_tablet::macos::Moni
     photocraft_tablet::macos::Monitor::install(sink(feed.clone())).map_err(|e| log::warn!("{e}")).ok()
 }
 
-/// Start the XInput2 reader when eframe runs on X11. On Wayland, `$DISPLAY` is Xwayland, which
+/// Start the XInput2 reader when eframe runs on X11 (also under Xwayland, where the app moves the
+/// window when it finds a pen: `display_choice`). On native Wayland, `$DISPLAY` is Xwayland, which
 /// sees none of this window's input (and a pen sample from another X app would outlive a mouse
 /// stroke here), so nothing starts.
 #[cfg(target_os = "linux")]
 pub fn spawn_x11(feed: &StylusFeed, display: Option<DisplayKind>) {
+    let debug = debug_enabled();
     if display != Some(DisplayKind::X11) {
-        log::info!("tablet pressure: not available on this display server ({display:?}); Wayland is a follow-up to #79");
+        let msg = format!(
+            "tablet pressure: not available on this display server ({display:?}); a pen may not paint at all on KDE Plasma 6.3+. Start with PHOTOCRAFT_DISPLAY=x11 to use Xwayland"
+        );
+        if debug {
+            eprintln!("photocraft {msg}");
+        }
+        log::info!("{msg}");
         return;
     }
-    if let Err(e) = photocraft_tablet::x11::spawn(None, sink(feed.clone())) {
-        log::warn!("{e}");
+    match photocraft_tablet::x11::spawn(None, sink(feed.clone())) {
+        Ok(_) if debug => match photocraft_tablet::x11::pen_devices(None) {
+            Ok(pens) if pens.is_empty() => eprintln!("photocraft tablet: X11 reader started; no pen devices yet (they can appear when the pen comes near)"),
+            Ok(pens) => {
+                for p in pens {
+                    eprintln!("photocraft tablet: pen device {} \"{}\" eraser={} axes={:?}", p.id, p.name, p.eraser, p.axes);
+                }
+            }
+            Err(e) => eprintln!("photocraft tablet: X11 reader started; listing devices failed: {e}"),
+        },
+        Ok(_) => {}
+        Err(e) => {
+            if debug {
+                eprintln!("photocraft tablet: {e}");
+            }
+            log::warn!("{e}");
+        }
     }
 }
 

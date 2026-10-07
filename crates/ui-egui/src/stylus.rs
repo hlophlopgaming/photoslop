@@ -16,8 +16,9 @@
 //! - **Linux X11**: the desktop app reads XInput2 raw valuator events on its own X connection
 //!   (`photocraft-tablet`, x11rb) and writes them into the [`StylusFeed`].
 //! - **Linux Wayland**: no tablet input yet (`zwp_tablet_v2` would have to share winit's
-//!   connection); pressure is 1. Launching with `WAYLAND_DISPLAY=` runs the app under Xwayland,
-//!   which reports tablet valuators.
+//!   connection), and since Plasma 6.3 KWin no longer turns the pen into a pointer either. So when
+//!   Xwayland reports a pen tablet, the desktop app runs its window under Xwayland, which reports
+//!   tablet valuators (`PHOTOCRAFT_DISPLAY=wayland` keeps native Wayland, pressure 1).
 //!
 //! Preferences › Tools › Use Tablet Pressure off makes a pen paint like a mouse. Flipping the pen
 //! to its eraser end selects the Eraser tool and flipping back restores the previous tool, as in

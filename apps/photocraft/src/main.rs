@@ -27,6 +27,9 @@ mod gpu_startup;
 // Pure logic is tested on every platform; only Linux runs the check.
 #[cfg(any(target_os = "linux", test))]
 mod linux_libs;
+// Native Wayland or Xwayland (pen tablets); pure logic tested everywhere.
+#[cfg(any(target_os = "linux", test))]
+mod display_choice;
 mod monitor_profile;
 mod services;
 // Windows gets pen pressure from winit (WM_POINTER); the web runner has its own listener.
@@ -88,12 +91,31 @@ fn main() -> eframe::Result {
         }
     }
 
+    // On a Wayland session with a pen tablet, run under Xwayland: winit has no Wayland tablet
+    // support, and KWin (Plasma 6.3+) no longer turns the pen into a pointer for us, so the pen
+    // couldn't paint at all (display_choice.rs; `PHOTOCRAFT_DISPLAY` overrides).
+    #[cfg(target_os = "linux")]
+    let mut display = display_choice::choose(std::time::Duration::from_millis(1500));
     // winit and wgpu dlopen the windowing and GPU libraries, and some of those crates panic when
     // one is missing (issue #201). Name the package to install and exit instead.
     #[cfg(target_os = "linux")]
-    if let Err(message) = linux_libs::preflight() {
-        eprint!("{message}");
-        std::process::exit(1);
+    if let Err(message) = linux_libs::preflight(display.session) {
+        // Moved to Xwayland on our own and its libraries are missing: stay on Wayland instead.
+        if display.force_x11 && display.requested == display_choice::Requested::Auto {
+            display =
+                display_choice::Choice::native_wayland(display.requested, "pen tablet found, but the X11 libraries are missing: staying on Wayland".into());
+            if let Err(message) = linux_libs::preflight(display.session) {
+                eprint!("{message}");
+                std::process::exit(1);
+            }
+        } else {
+            eprint!("{message}");
+            std::process::exit(1);
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if let Some(note) = &display.note {
+        eprintln!("photocraft: {note}");
     }
 
     let control = if let Some(port) = control_port {
@@ -142,6 +164,13 @@ fn main() -> eframe::Result {
     // Brush presets load in the background; the app attaches them when they arrive.
     let presets = services::presets_dir().map(photocraft_engine::preset_store::open_dir_async);
     let mut options = native_options();
+    #[cfg(target_os = "linux")]
+    if display.force_x11 {
+        options.event_loop_builder = Some(Box::new(|builder: &mut eframe::EventLoopBuilder<eframe::UserEvent>| {
+            use winit::platform::x11::EventLoopBuilderExtX11 as _;
+            builder.with_x11();
+        }));
+    }
     // Crash-safe GPU startup (#4): pick the backend (a marker left by a start that died in the
     // driver moves to a safer one), and lock this start's marker until the first frames render.
     let t_sentinel = std::time::Instant::now();
