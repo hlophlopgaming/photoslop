@@ -394,6 +394,23 @@ mod tests {
     }
 
     #[test]
+    fn stroke_texture_is_current_in_the_input_frame() {
+        let mut h = harness(None);
+        let a = h.state().last_canvas_rect.center() - vec2(90.0, 0.0);
+        press(&mut h, a, PointerButton::Primary, true);
+        for offset in [20.0, 60.0] {
+            h.input_mut().events.push(egui::Event::PointerMoved(a + vec2(offset, 0.0)));
+            h.run_steps(1);
+            assert!(h.state().drag.is_some());
+            let id = h.state().session.active().unwrap().doc.id;
+            let rendered = h.state().canvases[&id].tex_preview_key;
+            let ctx = h.ctx.clone();
+            crate::canvas::ensure_texture(h.state_mut(), &ctx, 0);
+            assert_eq!(rendered, h.state().canvases[&id].tex_preview_key, "the frame must already contain its latest pen movement");
+        }
+    }
+
+    #[test]
     fn one_frame_feeds_every_pointer_move_not_just_the_latest() {
         // Fast strokes used to lose the moves between two frames: the canvas read only
         // `interact_pointer_pos()` once per frame, so the stroke was a coarse polyline. Every

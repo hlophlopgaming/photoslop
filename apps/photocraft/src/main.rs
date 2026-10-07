@@ -59,6 +59,8 @@ fn native_options() -> eframe::NativeOptions {
             .with_titlebar_shown(false)
             .with_title_shown(false),
         centered: true,
+        // Keep pen/cursor feedback responsive instead of queueing two frames.
+        wgpu_options: eframe::egui_wgpu::WgpuConfiguration { surface: eframe::egui_wgpu::SurfaceConfig::LOW_LATENCY, ..Default::default() },
         ..Default::default()
     }
 }
@@ -341,6 +343,11 @@ fn main() -> eframe::Result {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_window_uses_low_latency_presentation() {
+        assert_eq!(super::native_options().wgpu_options.surface, eframe::egui_wgpu::SurfaceConfig::LOW_LATENCY);
+    }
+
     #[test]
     fn the_window_opens_centred_at_its_default_size() {
         let o = super::native_options();

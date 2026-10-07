@@ -1316,6 +1316,208 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
     let response = ui.allocate_rect(rect, Sense::click_and_drag());
     let painter = ui.painter_at(rect);
 
+    // Under an open dialog the canvas widget is inert, but the image still pans and zooms.
+    let under_dialog = !app.ui.dialogs.is_empty();
+    let free_hover = under_dialog && crate::dialogs::free_pointer_over(&ctx, rect).is_some();
+    // Navigation (wheel_nav.rs): scroll pans; pinch, ⌘-scroll and ⌥-scroll zoom around the pointer.
+    let wheel = crate::wheel_nav::read(&ctx, app.session.prefs().general.zoom_with_scroll_wheel);
+    // The wheel also scrolls over the scrollbars drawn on top of the canvas (last frame's hover).
+    let bars_id = egui::Id::new(("pc-canvas-bars-hover", idx));
+    let over_bars = ctx.data(|d| d.get_temp::<bool>(bars_id)).unwrap_or(false);
+    if response.hovered() || free_hover || over_bars {
+        let pointer = ui.input(|i| i.pointer.hover_pos());
+        match (wheel, pointer) {
+            (Some(crate::wheel_nav::Wheel::Zoom(f)), Some(p)) => {
+                let nz = (view.zoom * f).clamp(0.01, 64.0);
+                zoom_about(&mut view, &xf, p, nz);
+            }
+            (Some(crate::wheel_nav::Wheel::Pan(scroll)), _) => {
+                view.center[0] -= scroll.x / view.zoom * if flip { -1.0 } else { 1.0 };
+                view.center[1] -= scroll.y / view.zoom;
+            }
+            _ => {}
+        }
+    }
+
+    // Pen pressure/tilt for this frame's tool events (mouse = 1.0), unless Preferences › Tools ›
+    // Use Tablet Pressure is off; the pen's eraser end selects the Eraser.
+    app.stylus.use_pressure = app.session.prefs().tools.use_tablet_pressure;
+    app.stylus.update(&ui.input(|i| i.events.clone()));
+    crate::stylus::Stylus::sync_eraser_tool(app);
+    // Held keys (hold_keys.rs): Space repositions a crop frame, marquee, lasso or shape being
+    // drawn; otherwise Space is the Hand and ⌘Space / ⌘⌥Space the Zoom tool while held.
+    let reposition = crate::hold_keys::reposition_held(app, &ctx);
+    crate::crop_ui::set_space(app, reposition);
+    let mut drawing = crate::crop_ui::active(app);
+    if let Some(d) = app.drag.as_mut().filter(|d| crate::hold_keys::repositions(d.tool)) {
+        d.reposition = reposition;
+        drawing = true;
+    }
+    let temporary = crate::hold_keys::for_frame(app, &ctx, drawing);
+    let space_pan = temporary == Some(crate::hold_keys::Temporary::Hand);
+    let middle = ui.input(|i| i.pointer.middle_down());
+    let tool = match temporary {
+        Some(t) => t.tool(),
+        None if middle => Tool::Hand,
+        None => app.ui.tool,
+    };
+    // Zoom direction: the temporary zoom key decides, else ⌥ (Zoom tool).
+    let zoom_out = |alt: bool| match temporary {
+        Some(crate::hold_keys::Temporary::ZoomOut) => true,
+        Some(crate::hold_keys::Temporary::ZoomIn) => false,
+        _ => alt,
+    };
+
+    let mut picker_cursor = None;
+    if under_dialog {
+        // With the Color Picker on top the image is its eyedropper, whatever the tool; Space and
+        // the middle button still pan (`color_picker_ui::sample_at`).
+        let picking = primary && crate::color_picker_ui::top(app).is_some();
+        let hand = app.ui.tool == Tool::Hand && !picking;
+        if let Some(d) = crate::dialogs::pan_delta(&ctx, rect, hand) {
+            view.center[0] -= d.x / view.zoom * if flip { -1.0 } else { 1.0 };
+            view.center[1] -= d.y / view.zoom;
+            ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
+        } else if free_hover && (space_pan || hand) {
+            ctx.set_cursor_icon(egui::CursorIcon::Grab);
+        } else if picking && let Some(p) = crate::dialogs::free_pointer_over(&ctx, rect) {
+            if app.session.prefs().cursors.other == photocraft_engine::prefs::OtherCursor::Precise {
+                ctx.set_cursor_icon(egui::CursorIcon::Crosshair);
+            } else {
+                // The tip of the icon's pipette is at (2, 22) of its 24-unit box.
+                picker_cursor = Some(p);
+                ctx.set_cursor_icon(egui::CursorIcon::None);
+            }
+            if let Some(p) = crate::dialogs::free_press(&ctx, rect) {
+                let d = xf.to_doc(p);
+                crate::color_picker_ui::sample_at(app, d[0], d[1]);
+            }
+        }
+    }
+    if tool == Tool::Hand && response.dragged() {
+        let d = response.drag_delta();
+        view.center[0] -= d.x / view.zoom * if flip { -1.0 } else { 1.0 };
+        view.center[1] -= d.y / view.zoom;
+    } else if primary {
+        let mods = ui.input(|i| i.modifiers);
+        // Tools follow the left button; the right one opens the Brush Preset picker or erases
+        // (Preferences › Tools, `paint_mouse`).
+        crate::paint_mouse::sync_tool_smoothing(app);
+        let mut buttons = crate::paint_mouse::canvas_buttons(app, &response, tool);
+        // Right-click with the Move tool, or ⌘/Ctrl+right-click: the layers under the pointer.
+        if response.secondary_clicked()
+            && crate::layer_pick_ui::is_gesture(tool, mods)
+            && let Some(p) = response.interact_pointer_pos()
+        {
+            let d = xf.to_doc(p);
+            crate::layer_pick_ui::open(app, [p.x, p.y], d[0], d[1]);
+        }
+        // The (temporary) Hand pans above; its gestures never reach the tool underneath.
+        if tool == Tool::Hand {
+            (buttons.started, buttons.dragged, buttons.stopped) = (false, false, false);
+        }
+        // Zoom tool drags: scrubby zoom or a zoom rectangle (zoom_tool.rs); clicks step below.
+        if tool == Tool::Zoom && crate::zoom_tool::drag(app, &ctx, &mut view, &xf, &buttons, response.interact_pointer_pos()) {
+            (buttons.started, buttons.dragged, buttons.stopped) = (false, false, false);
+        }
+        // A drag is only recognised once the pointer has moved past egui's click distance: the
+        // gesture starts where the button went down, not where it is now (#123).
+        let gesture_active_before = app.drag.is_some();
+        if buttons.started
+            && let Some(p) = ui.input(|i| i.pointer.press_origin()).filter(|p| rect.contains(*p)).or(response.interact_pointer_pos())
+        {
+            if tool == Tool::Move && app.ui.transform.is_none() {
+                begin_transform_controls_at(app, &ctx, &xf, p);
+            }
+            let d = xf.to_doc(p);
+            tool_event(app, ToolEvent::Down { x: d[0], y: d[1], pressure: app.stylus.pressure() }, mods);
+        }
+        if buttons.dragged || buttons.stopped {
+            // Feed every pointer move the OS delivered this frame, not just the latest position, so
+            // a fast stroke is sampled densely and renders as a smooth curve instead of a coarse
+            // polyline. egui-winit pushes one `PointerMoved` per `CursorMoved`, and they accumulate
+            // while a frame is slow, so reading them all recovers the moves a per-frame
+            // `interact_pointer_pos()` would drop. Only freehand tools take the whole batch; the
+            // rest follow the pointer's latest position. The moves are bounded to the gesture's own
+            // press..release interval (`pointer_moves`), so the start and stop frames keep their
+            // valid samples without leaking a move from outside the gesture.
+            let events = ui.input(|i| i.events.clone());
+            let button = if response.dragged_by(PointerButton::Secondary)
+                || response.drag_started_by(PointerButton::Secondary)
+                || response.drag_stopped_by(PointerButton::Secondary)
+            {
+                PointerButton::Secondary
+            } else {
+                PointerButton::Primary
+            };
+            let press_this_frame = events.iter().any(|e| matches!(e, egui::Event::PointerButton { button: b, pressed: true, .. } if *b == button));
+            let down_at_start = !press_this_frame && (gesture_active_before || buttons.started);
+            let mut positions = if freehand_tool(tool) {
+                pointer_moves(&events, button, down_at_start)
+            } else if buttons.dragged {
+                response.interact_pointer_pos().into_iter().collect()
+            } else {
+                Vec::new()
+            };
+            // A frame with no raw move still tracks a held gesture (a still pointer, a modifier
+            // change): fall back to the latest position, as the old code always did.
+            if positions.is_empty()
+                && buttons.dragged
+                && let Some(p) = response.interact_pointer_pos()
+            {
+                positions.push(p);
+            }
+            app.defer_live_stroke = true;
+            for p in positions {
+                let d = xf.to_doc(p);
+                tool_event(app, ToolEvent::Move { x: d[0], y: d[1], pressure: app.stylus.pressure() }, mods);
+            }
+            app.defer_live_stroke = false;
+            // One live-stroke update for the whole frame, not one per recovered sample.
+            feed_live_stroke(app);
+        }
+        if buttons.stopped {
+            let p = response.interact_pointer_pos().map(|p| xf.to_doc(p)).or_else(|| app.drag.as_ref().and_then(|d| d.points.last().map(|q| [q[0], q[1]])));
+            if let Some(d) = p {
+                tool_event(app, ToolEvent::Up { x: d[0], y: d[1] }, mods);
+            }
+        }
+        if buttons.clicked
+            && let Some(p) = response.interact_pointer_pos()
+        {
+            let d = xf.to_doc(p);
+            match tool {
+                Tool::Zoom => {
+                    let nz = zoom_step(view.zoom, if zoom_out(mods.alt) { -1 } else { 1 });
+                    zoom_about(&mut view, &xf, p, nz);
+                }
+                // A click with the (temporary) Hand does nothing, never the tool underneath.
+                Tool::Hand => {}
+                // Double-clicking closes the polygonal lasso: the first click placed the last
+                // vertex (or already closed it), so the second never starts a new polygon. egui
+                // reports it as a triple click when a vertex went down shortly before.
+                Tool::PolygonLasso if response.double_clicked() || response.triple_clicked() => commit_polygon(app),
+                _ => {
+                    if tool == Tool::Move && app.ui.transform.is_none() {
+                        begin_transform_controls_at(app, &ctx, &xf, p);
+                    }
+                    tool_event(app, ToolEvent::Down { x: d[0], y: d[1], pressure: 1.0 }, mods);
+                    tool_event(app, ToolEvent::Up { x: d[0], y: d[1] }, mods);
+                }
+            }
+        }
+        if app.ui.transform.is_some() && response.double_clicked() {
+            crate::transform_tool::commit(app);
+        }
+        if tool == Tool::Type && response.double_clicked() {
+            crate::type_tool::select_word(app);
+        }
+    }
+
+    // Consume this frame's input before uploading/drawing the canvas. Otherwise
+    // the pen cursor is current but the stroke texture is one frame behind it.
+    let doc = app.session.documents()[idx].doc.clone();
+    let xf = ViewXform { rect, zoom: view.zoom, center: view.center, flip };
     match crate::prefs_ui::pasteboard_color(app) {
         Some(c) => {
             ui.painter_at(rect).rect_filled(rect, 0.0, c);
@@ -1484,201 +1686,10 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         }
     }
 
-    // Under an open dialog the canvas widget is inert, but the image still pans and zooms.
-    let under_dialog = !app.ui.dialogs.is_empty();
-    let free_hover = under_dialog && crate::dialogs::free_pointer_over(&ctx, rect).is_some();
-    // Navigation (wheel_nav.rs): scroll pans; pinch, ⌘-scroll and ⌥-scroll zoom around the pointer.
-    let wheel = crate::wheel_nav::read(&ctx, app.session.prefs().general.zoom_with_scroll_wheel);
-    // The wheel also scrolls over the scrollbars drawn on top of the canvas (last frame's hover).
-    let bars_id = egui::Id::new(("pc-canvas-bars-hover", idx));
-    let over_bars = ctx.data(|d| d.get_temp::<bool>(bars_id)).unwrap_or(false);
-    if response.hovered() || free_hover || over_bars {
-        let pointer = ui.input(|i| i.pointer.hover_pos());
-        match (wheel, pointer) {
-            (Some(crate::wheel_nav::Wheel::Zoom(f)), Some(p)) => {
-                let nz = (view.zoom * f).clamp(0.01, 64.0);
-                zoom_about(&mut view, &xf, p, nz);
-            }
-            (Some(crate::wheel_nav::Wheel::Pan(scroll)), _) => {
-                view.center[0] -= scroll.x / view.zoom * if flip { -1.0 } else { 1.0 };
-                view.center[1] -= scroll.y / view.zoom;
-            }
-            _ => {}
-        }
+    if let Some(p) = picker_cursor {
+        crate::icons::cursor(&ctx, "pipette", p, vec2(2.0, 22.0) / 24.0, 20.0);
     }
-
-    // Pen pressure/tilt for this frame's tool events (mouse = 1.0), unless Preferences › Tools ›
-    // Use Tablet Pressure is off; the pen's eraser end selects the Eraser.
-    app.stylus.use_pressure = app.session.prefs().tools.use_tablet_pressure;
-    app.stylus.update(&ui.input(|i| i.events.clone()));
-    crate::stylus::Stylus::sync_eraser_tool(app);
-    // Held keys (hold_keys.rs): Space repositions a crop frame, marquee, lasso or shape being
-    // drawn; otherwise Space is the Hand and ⌘Space / ⌘⌥Space the Zoom tool while held.
-    let reposition = crate::hold_keys::reposition_held(app, &ctx);
-    crate::crop_ui::set_space(app, reposition);
-    let mut drawing = crate::crop_ui::active(app);
-    if let Some(d) = app.drag.as_mut().filter(|d| crate::hold_keys::repositions(d.tool)) {
-        d.reposition = reposition;
-        drawing = true;
-    }
-    let temporary = crate::hold_keys::for_frame(app, &ctx, drawing);
-    let space_pan = temporary == Some(crate::hold_keys::Temporary::Hand);
-    let middle = ui.input(|i| i.pointer.middle_down());
-    let tool = match temporary {
-        Some(t) => t.tool(),
-        None if middle => Tool::Hand,
-        None => app.ui.tool,
-    };
-    // Zoom direction: the temporary zoom key decides, else ⌥ (Zoom tool).
-    let zoom_out = |alt: bool| match temporary {
-        Some(crate::hold_keys::Temporary::ZoomOut) => true,
-        Some(crate::hold_keys::Temporary::ZoomIn) => false,
-        _ => alt,
-    };
-
-    if under_dialog {
-        // With the Color Picker on top the image is its eyedropper, whatever the tool; Space and
-        // the middle button still pan (`color_picker_ui::sample_at`).
-        let picking = primary && crate::color_picker_ui::top(app).is_some();
-        let hand = app.ui.tool == Tool::Hand && !picking;
-        if let Some(d) = crate::dialogs::pan_delta(&ctx, rect, hand) {
-            view.center[0] -= d.x / view.zoom * if flip { -1.0 } else { 1.0 };
-            view.center[1] -= d.y / view.zoom;
-            ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
-        } else if free_hover && (space_pan || hand) {
-            ctx.set_cursor_icon(egui::CursorIcon::Grab);
-        } else if picking && let Some(p) = crate::dialogs::free_pointer_over(&ctx, rect) {
-            if app.session.prefs().cursors.other == photocraft_engine::prefs::OtherCursor::Precise {
-                ctx.set_cursor_icon(egui::CursorIcon::Crosshair);
-            } else {
-                // The tip of the icon's pipette is at (2, 22) of its 24-unit box.
-                crate::icons::cursor(&ctx, "pipette", p, vec2(2.0, 22.0) / 24.0, 20.0);
-                ctx.set_cursor_icon(egui::CursorIcon::None);
-            }
-            if let Some(p) = crate::dialogs::free_press(&ctx, rect) {
-                let d = xf.to_doc(p);
-                crate::color_picker_ui::sample_at(app, d[0], d[1]);
-            }
-        }
-    }
-    if tool == Tool::Hand && response.dragged() {
-        let d = response.drag_delta();
-        view.center[0] -= d.x / view.zoom * if flip { -1.0 } else { 1.0 };
-        view.center[1] -= d.y / view.zoom;
-    } else if primary {
-        let mods = ui.input(|i| i.modifiers);
-        // Tools follow the left button; the right one opens the Brush Preset picker or erases
-        // (Preferences › Tools, `paint_mouse`).
-        crate::paint_mouse::sync_tool_smoothing(app);
-        let mut buttons = crate::paint_mouse::canvas_buttons(app, &response, tool);
-        // Right-click with the Move tool, or ⌘/Ctrl+right-click: the layers under the pointer.
-        if response.secondary_clicked()
-            && crate::layer_pick_ui::is_gesture(tool, mods)
-            && let Some(p) = response.interact_pointer_pos()
-        {
-            let d = xf.to_doc(p);
-            crate::layer_pick_ui::open(app, [p.x, p.y], d[0], d[1]);
-        }
-        // The (temporary) Hand pans above; its gestures never reach the tool underneath.
-        if tool == Tool::Hand {
-            (buttons.started, buttons.dragged, buttons.stopped) = (false, false, false);
-        }
-        // Zoom tool drags: scrubby zoom or a zoom rectangle (zoom_tool.rs); clicks step below.
-        if tool == Tool::Zoom && crate::zoom_tool::drag(app, &ctx, &mut view, &xf, &buttons, response.interact_pointer_pos()) {
-            (buttons.started, buttons.dragged, buttons.stopped) = (false, false, false);
-        }
-        // A drag is only recognised once the pointer has moved past egui's click distance: the
-        // gesture starts where the button went down, not where it is now (#123).
-        let gesture_active_before = app.drag.is_some();
-        if buttons.started
-            && let Some(p) = ui.input(|i| i.pointer.press_origin()).filter(|p| rect.contains(*p)).or(response.interact_pointer_pos())
-        {
-            if tool == Tool::Move && app.ui.transform.is_none() {
-                begin_transform_controls_at(app, &ctx, &xf, p);
-            }
-            let d = xf.to_doc(p);
-            tool_event(app, ToolEvent::Down { x: d[0], y: d[1], pressure: app.stylus.pressure() }, mods);
-        }
-        if buttons.dragged || buttons.stopped {
-            // Feed every pointer move the OS delivered this frame, not just the latest position, so
-            // a fast stroke is sampled densely and renders as a smooth curve instead of a coarse
-            // polyline. egui-winit pushes one `PointerMoved` per `CursorMoved`, and they accumulate
-            // while a frame is slow, so reading them all recovers the moves a per-frame
-            // `interact_pointer_pos()` would drop. Only freehand tools take the whole batch; the
-            // rest follow the pointer's latest position. The moves are bounded to the gesture's own
-            // press..release interval (`pointer_moves`), so the start and stop frames keep their
-            // valid samples without leaking a move from outside the gesture.
-            let events = ui.input(|i| i.events.clone());
-            let button = if response.dragged_by(PointerButton::Secondary)
-                || response.drag_started_by(PointerButton::Secondary)
-                || response.drag_stopped_by(PointerButton::Secondary)
-            {
-                PointerButton::Secondary
-            } else {
-                PointerButton::Primary
-            };
-            let press_this_frame = events.iter().any(|e| matches!(e, egui::Event::PointerButton { button: b, pressed: true, .. } if *b == button));
-            let down_at_start = !press_this_frame && (gesture_active_before || buttons.started);
-            let mut positions = if freehand_tool(tool) {
-                pointer_moves(&events, button, down_at_start)
-            } else if buttons.dragged {
-                response.interact_pointer_pos().into_iter().collect()
-            } else {
-                Vec::new()
-            };
-            // A frame with no raw move still tracks a held gesture (a still pointer, a modifier
-            // change): fall back to the latest position, as the old code always did.
-            if positions.is_empty()
-                && buttons.dragged
-                && let Some(p) = response.interact_pointer_pos()
-            {
-                positions.push(p);
-            }
-            app.defer_live_stroke = true;
-            for p in positions {
-                let d = xf.to_doc(p);
-                tool_event(app, ToolEvent::Move { x: d[0], y: d[1], pressure: app.stylus.pressure() }, mods);
-            }
-            app.defer_live_stroke = false;
-            // One live-stroke update for the whole frame, not one per recovered sample.
-            feed_live_stroke(app);
-        }
-        if buttons.stopped {
-            let p = response.interact_pointer_pos().map(|p| xf.to_doc(p)).or_else(|| app.drag.as_ref().and_then(|d| d.points.last().map(|q| [q[0], q[1]])));
-            if let Some(d) = p {
-                tool_event(app, ToolEvent::Up { x: d[0], y: d[1] }, mods);
-            }
-        }
-        if buttons.clicked
-            && let Some(p) = response.interact_pointer_pos()
-        {
-            let d = xf.to_doc(p);
-            match tool {
-                Tool::Zoom => {
-                    let nz = zoom_step(view.zoom, if zoom_out(mods.alt) { -1 } else { 1 });
-                    zoom_about(&mut view, &xf, p, nz);
-                }
-                // A click with the (temporary) Hand does nothing, never the tool underneath.
-                Tool::Hand => {}
-                // Double-clicking closes the polygonal lasso: the first click placed the last
-                // vertex (or already closed it), so the second never starts a new polygon. egui
-                // reports it as a triple click when a vertex went down shortly before.
-                Tool::PolygonLasso if response.double_clicked() || response.triple_clicked() => commit_polygon(app),
-                _ => {
-                    if tool == Tool::Move && app.ui.transform.is_none() {
-                        begin_transform_controls_at(app, &ctx, &xf, p);
-                    }
-                    tool_event(app, ToolEvent::Down { x: d[0], y: d[1], pressure: 1.0 }, mods);
-                    tool_event(app, ToolEvent::Up { x: d[0], y: d[1] }, mods);
-                }
-            }
-        }
-        if app.ui.transform.is_some() && response.double_clicked() {
-            crate::transform_tool::commit(app);
-        }
-        if tool == Tool::Type && response.double_clicked() {
-            crate::type_tool::select_word(app);
-        }
+    if primary && !(tool == Tool::Hand && response.dragged()) {
         if app.ui.extras.grid && app.ui.view.extras {
             crate::rulers::draw_grid(app, &painter, &xf, &doc);
         }
