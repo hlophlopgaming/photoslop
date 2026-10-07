@@ -28,7 +28,7 @@ changes.
 Keep English source keys, contexts, command IDs, placeholders and escapes intact.
 Retain the trailing `…` on commands that open a dialog. Missing translations use
 the framework's English fallback. User-supplied names and document data are not
-translated. Product names and technology names such as PhotoCraft, ArtCraft,
+translated. Product names and technology names such as PhotoCraft,
 OpenType, RGB, CMYK and Lab retain their spelling.
 
 The #169 locale resolver recognizes `zh`, `zh-CN`, `zh-SG` and `zh-Hans`
