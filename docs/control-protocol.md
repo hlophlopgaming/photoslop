@@ -56,6 +56,11 @@ The transport is `apps/photocraft/src/control_server.rs`, and the handlers are i
 
 ## Engine commands
 
+Change the UI language without restarting with `prefs.set`:
+`{"path":"interface.language","value":"fr"}`. Supported codes and preview/apply behaviour
+are documented in [UI localisation](localization.md). `prefs.get` and the existing preference
+store expose and persist the same setting; scripts keep using canonical command IDs.
+
 `engine.execute` runs any command by id. `engine.commands` (or the engine command `command.list`) lists them all, with labels, menu paths, shortcuts, a parameter description, and whether each is currently enabled. Examples:
 
 | Command | Params |
@@ -75,6 +80,10 @@ The transport is `apps/photocraft/src/control_server.rs`, and the handlers are i
 UI-level commands (`view.zoomIn`, `window.theme.pro`, `edit.search`, …) are also accepted by `engine.execute` and `ui.menu.invoke`.
 
 Commands that read or write files by path, instead of through the automation roots, are refused with "automation command `…` uses ambient filesystem paths and is disabled; use capability-scoped document methods". That covers every `file.*` command except `file.new`, the `file.close*` commands and a few path-free ones such as `file.fileInfo`, so `file.open`, `file.save`, `file.saveAs` and `file.saveACopy` always fail here: open and save with `app.open` / `app.save`. Path parameters of other commands (`layer.exportAs {path}`, `filter.distort.displace {mapPath}`, …) are refused the same way, and the desktop app also refuses `image.mode.*`, which can load the colour profiles set in its preferences. The rules are in `crates/automation/src/workspace.rs`.
+
+`type.editText` starts inline editing of the active type layer and selects all its text, like
+double-clicking its thumbnail in Layers. Text input, Commit and Cancel use the existing Type tool
+editing session; non-type layers return an error without changing the tool or document.
 
 ### Background jobs (#210)
 
@@ -111,7 +120,8 @@ log text file. GPU on/off and the GPU tile size apply at the next launch.
 The desktop app stores them in `preferences.json` in the platform config directory (macOS
 `~/Library/Application Support/Photocraft`, Windows `%APPDATA%\Photocraft`, Linux
 `$XDG_CONFIG_HOME/photocraft`; override with `PHOTOCRAFT_CONFIG_DIR`); autosaves go to its
-`Recovery` folder. In portable mode (a `portable.txt` or `PhotoCraft.portable` file beside the
+`Recovery` folder, and the window size and position, the dock width and floating-panel geometry
+to `ui.ron` beside it (a file holding values that would crash startup is discarded). In portable mode (a `portable.txt` or `PhotoCraft.portable` file beside the
 executable, as in the Windows portable zip) that directory is `PhotoCraftData` next to the
 executable instead. The web build keeps them in `localStorage`. A save writes only the values
 this instance changed since it last loaded or saved them over what storage holds now, so a second

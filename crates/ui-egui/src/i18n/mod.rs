@@ -20,8 +20,8 @@
 
 mod catalog;
 
+use std::cell::Cell;
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use catalog::Catalog;
 
@@ -70,7 +70,11 @@ fn plural_cs(n: u64) -> usize {
 }
 
 /// The registry. English first: it is the fallback and the source language.
+<<<<<<< HEAD
 pub static LANGUAGES: [LangInfo; 7] = [
+=======
+pub static LANGUAGES: [LangInfo; 10] = [
+>>>>>>> upstream/main
     LangInfo { code: "en", name: "English", source: "", plural: plural_one_other, complete_menus: false, catalog: OnceLock::new() },
     LangInfo { code: "ja", name: "日本語", source: include_str!("ja.tsv"), plural: plural_none, complete_menus: true, catalog: OnceLock::new() },
     LangInfo {
@@ -84,6 +88,12 @@ pub static LANGUAGES: [LangInfo; 7] = [
     LangInfo { code: "es", name: "Español", source: include_str!("es.tsv"), plural: plural_one_other, complete_menus: true, catalog: OnceLock::new() },
     LangInfo { code: "ru", name: "Русский", source: include_str!("ru.tsv"), plural: plural_russian, complete_menus: true, catalog: OnceLock::new() },
     LangInfo { code: "cs", name: "Čeština", source: include_str!("cs.tsv"), plural: plural_cs, complete_menus: true, catalog: OnceLock::new() },
+<<<<<<< HEAD
+=======
+    LangInfo { code: "fr", name: "Français", source: include_str!("fr.tsv"), plural: plural_fr, complete_menus: true, catalog: OnceLock::new() },
+    LangInfo { code: "id", name: "Bahasa Indonesia", source: include_str!("id.tsv"), plural: plural_none, complete_menus: true, catalog: OnceLock::new() },
+    LangInfo { code: "ko", name: "한국어", source: include_str!("ko.tsv"), plural: plural_none, complete_menus: true, catalog: OnceLock::new() },
+>>>>>>> upstream/main
 ];
 
 impl LangInfo {
@@ -125,7 +135,10 @@ impl Lang {
     /// Resolve the `interface.language` preference: a language code, or `auto` (and anything
     /// unknown, e.g. a code from a newer version) to follow the system locale.
     pub fn from_pref(pref: &str) -> Lang {
-        Lang::from_code(pref).unwrap_or_else(system_lang)
+        if pref.eq_ignore_ascii_case("auto") {
+            return system_lang();
+        }
+        Lang::from_code(pref).or_else(|| lang_from_tag(pref)).unwrap_or_else(system_lang)
     }
 
     /// Every registered language.
@@ -221,19 +234,58 @@ fn detect_system_lang() -> Lang {
     Lang::EN
 }
 
-/// Index into [`LANGUAGES`] of the language the UI is drawn in this frame.
-static CURRENT: AtomicUsize = AtomicUsize::new(0);
+thread_local! {
+    // Independent app/test threads must not change each other's drawing language.
+    static CURRENT: Cell<Lang> = const { Cell::new(Lang::EN) };
+}
 
 /// Set the UI language for drawing (the shell calls this once per frame from the preference), so
 /// widgets can translate without every call site carrying a language around.
 pub fn set_current(lang: Lang) {
-    let i = LANGUAGES.iter().position(|l| l.code == lang.code()).unwrap_or(0);
-    CURRENT.store(i, Ordering::Relaxed);
+    CURRENT.set(lang);
 }
 
 /// The language the UI is drawn in.
 pub fn current() -> Lang {
-    Lang(LANGUAGES.get(CURRENT.load(Ordering::Relaxed)).unwrap_or(&LANGUAGES[0]))
+    CURRENT.get()
+}
+
+/// Temporarily draw in another language, restoring the previous one even on unwinding.
+/// Preferences previews use this without changing the saved setting or other dialogs.
+pub fn with_language<R>(lang: Lang, draw: impl FnOnce() -> R) -> R {
+    let _restore = language_scope(lang);
+    draw()
+}
+
+/// Keep the language active until this guard is dropped on the drawing thread.
+#[must_use]
+pub fn language_scope(lang: Lang) -> impl Drop {
+    struct Restore {
+        previous: Lang,
+        _thread: std::marker::PhantomData<std::rc::Rc<()>>,
+    }
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            set_current(self.previous);
+        }
+    }
+    let restore = Restore { previous: current(), _thread: std::marker::PhantomData };
+    set_current(lang);
+    restore
+}
+
+/// Apply a committed language to this context. Font caches are rebuilt only on a language
+/// change, so Han glyphs follow the selected script even when the previous font covered them.
+pub fn sync_context(ctx: &egui::Context, language: &str) {
+    let lang = Lang::from_pref(language);
+    set_current(lang);
+    let id = egui::Id::new("photocraft-ui-language");
+    let changed = ctx.data(|data| data.get_temp::<Lang>(id) != Some(lang));
+    if changed {
+        ctx.data_mut(|data| data.insert_temp(id, lang));
+        crate::theme::install_fonts(ctx);
+        ctx.request_repaint();
+    }
 }
 
 /// Does `lang` have a catalog entry for this plain string? (English never does: it is the source.)
@@ -285,6 +337,15 @@ mod tests {
     const JA: fn() -> Lang = || Lang::from_code("ja").expect("ja registered");
     const ZH: fn() -> Lang = || Lang::from_code("zh-hant").expect("zh-hant registered");
     const CS: fn() -> Lang = || Lang::from_code("cs").expect("cs registered");
+    const ID: fn() -> Lang = || Lang::from_code("id").expect("id registered");
+
+    #[test]
+    fn indonesian_tags_resolve() {
+        for tag in ["id", "id-ID", "id_ID", "id_ID.UTF-8"] {
+            assert_eq!(lang_from_tag(tag), Some(ID()), "{tag}");
+        }
+        assert_eq!(ID().name(), "Bahasa Indonesia");
+    }
 
     #[test]
     fn tags_map_to_languages() {
@@ -295,7 +356,12 @@ mod tests {
         assert_eq!(lang_from_tag("POSIX"), Some(Lang::EN));
         assert_eq!(lang_from_tag("cs_CZ.UTF-8"), Some(CS()));
         assert_eq!(lang_from_tag("cs-CZ"), Some(CS()));
+<<<<<<< HEAD
         assert_eq!(lang_from_tag("fr_FR"), None);
+=======
+        assert_eq!(lang_from_tag("fr_FR"), Lang::from_code("fr"));
+        assert_eq!(lang_from_tag("de_DE"), None);
+>>>>>>> upstream/main
         // Traditional Chinese: by region, by script, and with a region after the script.
         assert_eq!(lang_from_tag("zh_TW.UTF-8"), Some(ZH()));
         assert_eq!(lang_from_tag("zh-TW"), Some(ZH()));
@@ -324,7 +390,12 @@ mod tests {
     #[test]
     fn macos_language_list_is_parsed() {
         assert_eq!(first_supported("(\n    \"ja-JP\",\n    \"en-US\"\n)\n"), Some(JA()));
+<<<<<<< HEAD
         assert_eq!(first_supported("(\n    \"fr-FR\",\n    \"en-US\"\n)\n"), Some(Lang::EN));
+=======
+        assert_eq!(first_supported("(\n    \"fr-FR\",\n    \"en-US\"\n)\n"), Lang::from_code("fr"));
+        assert_eq!(first_supported("(\n    \"de-DE\",\n    \"en-US\"\n)\n"), Some(Lang::EN));
+>>>>>>> upstream/main
         assert_eq!(first_supported("(\n    \"zh-Hant-TW\",\n    \"en-US\"\n)\n"), Some(ZH()));
         assert_eq!(first_supported("("), None);
     }
@@ -554,3 +625,6 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod live_tests;

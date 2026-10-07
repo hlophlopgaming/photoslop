@@ -72,6 +72,7 @@ pub mod mask_thumbs_ui;
 pub mod menu_catalog;
 pub mod menu_nav;
 pub mod menus;
+pub mod monitor_status;
 pub mod move_mods;
 pub mod move_ui;
 pub mod new_doc_ui;
@@ -238,13 +239,20 @@ pub struct Services {
     /// `photocraft_engine::preset_store`). Attached to the session once it arrives; without
     /// one, brush presets are session-only (web, tests).
     pub preset_store: Option<std::sync::mpsc::Receiver<photocraft_engine::preset_store::Opened>>,
+    /// Reads the displays and their ICC profiles in the background (desktop macOS; see
+    /// `monitor_status`). Without one, the canvas uses the profile chosen in Color Settings, or sRGB.
+    pub read_displays: Option<monitor_status::ReadDisplaysFn>,
 }
 
 pub struct PhotocraftApp {
     pub session: Session,
     pub ui: UiState,
     pub services: Services,
-    canvases: HashMap<DocId, canvas::CanvasCache>,
+    /// Canvas caches per (document, display): CPU textures hold monitor values; the GPU
+    /// canvas state is shared (`canvas::GPU_OUTPUT`).
+    canvases: HashMap<(DocId, u32), canvas::CanvasCache>,
+    /// Display profile readings (#569).
+    monitors: monitor_status::State,
     checker: Option<egui::TextureHandle>,
     drag: Option<canvas::Drag>,
     /// Brush/Eraser stroke being drawn, rendered by the engine (see `canvas::LiveStroke`).
@@ -385,6 +393,7 @@ impl PhotocraftApp {
             ui: UiState::default(),
             services,
             canvases: HashMap::new(),
+            monitors: Default::default(),
             checker: None,
             drag: None,
             live_stroke: None,
@@ -860,6 +869,9 @@ impl eframe::App for PhotocraftApp {
         self.collect_screenshots(ctx);
         self.issue_screenshots(ctx);
         prefs_ui::tick(self, ctx);
+        monitor_status::poll(self, ctx);
+        // Control requests and persisted preferences can change the language in this frame.
+        i18n::sync_context(ctx, &self.session.prefs().interface.language);
         // A window bigger than its display (1440 × 900 on 1366 × 768) runs under the taskbar:
         // maximize it into the work area once (#315).
         work_area::fit_window(ctx);
@@ -893,6 +905,7 @@ impl eframe::App for PhotocraftApp {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        i18n::set_current(i18n::Lang::from_pref(&self.session.prefs().interface.language));
         // Fonts registered via set_fonts only take effect next frame; named families would panic now.
         if !self.fonts_ready {
             ctx.request_repaint();
