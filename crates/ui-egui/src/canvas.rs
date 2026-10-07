@@ -282,6 +282,7 @@ pub(crate) fn freehand_tool(tool: Tool) -> bool {
             | Tool::Burn
             | Tool::Sponge
             | Tool::Lasso
+            | Tool::Patch
             | Tool::QuickSelection
     )
 }
@@ -441,6 +442,10 @@ fn display_doc(app: &mut PhotocraftApp, idx: usize) -> (std::sync::Arc<Document>
     if let Some(shown) = crate::move_ui::display_doc(app, idx) {
         return shown;
     }
+    // Patch Tool drag: the selection healed from where the pointer is.
+    if let Some(shown) = crate::patch_preview::display_doc(app, idx) {
+        return shown;
+    }
     let st = &app.session.documents()[idx];
     if let Some(l) = live_stroke(app, idx) {
         return (l.stroke.doc.clone(), l.display_key());
@@ -514,9 +519,9 @@ pub fn navigator_texture(app: &mut PhotocraftApp, ctx: &egui::Context, idx: usiz
     {
         return Some(t.id());
     }
-    // While a Move drag is under way the navigator keeps its image and catches up on release.
+    // While a Move or Patch drag is under way the navigator keeps its image and catches up on release.
     if let Some((_, _, t)) = &cached
-        && crate::move_ui::showing(app)
+        && (crate::move_ui::showing(app) || crate::patch_preview::showing(app))
     {
         return Some(t.id());
     }
@@ -627,6 +632,13 @@ fn damage_since(app: &PhotocraftApp, idx: usize, seen: (u64, u64), now: (u64, u6
     if (seen.0 == now.0 || (seen.0 + 1 == now.0 && last_damage.is_some_and(|r| r.is_empty())))
         && let Some(st) = app.session.documents().get(idx)
         && let Some(r) = crate::move_ui::damage(app, st.doc.id, now.0, seen.1 ^ display_key, now.1)
+    {
+        return Some(if r.is_empty() { r } else { r.inflate(effect_reach(&st.doc.layers)) });
+    }
+    // Between a Patch drag's previews: the areas they healed.
+    if seen.0 == now.0
+        && let Some(st) = app.session.documents().get(idx)
+        && let Some(r) = crate::patch_preview::damage(app, st.doc.id, now.0, seen.1 ^ display_key, now.1)
     {
         return Some(if r.is_empty() { r } else { r.inflate(effect_reach(&st.doc.layers)) });
     }
@@ -954,6 +966,8 @@ fn tabs(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let active = app.session.active_index();
     let mut activate = None;
     let mut close = None;
+    let mut tab_action = None;
+    let tab_count = app.session.documents().len();
     let (mut focus_open, mut cancel_open) = (None, None);
     let focused_open = app.jobs.focus.is_some();
     egui::Frame::NONE.fill(t.canvas).inner_margin(egui::Margin { left: 8, right: 8, top: 6, bottom: 4 }).show(ui, |ui| {
@@ -988,6 +1002,9 @@ fn tabs(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 } else if resp.clicked() {
                     activate = Some(i);
                 }
+                resp.context_menu(|ui| {
+                    tab_action = tab_context_menu(ui, i, tab_count);
+                });
             }
             // Files opening in the background: a tab with a progress underline; × cancels.
             for (job, name, frac) in crate::jobs_ui::open_tabs(app) {
@@ -1024,6 +1041,33 @@ fn tabs(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     if let Some(i) = close {
         let _ = crate::menus::invoke(app, ui.ctx(), "file.close", json!({"document": i}));
     }
+    if let Some((id, params)) = tab_action
+        && let Err(e) = crate::menus::invoke(app, ui.ctx(), id, params)
+    {
+        app.ui.status = e;
+        app.ui.status_error = true;
+    }
+}
+
+/// All tab actions go through the same guarded File commands as the menu bar, including the
+/// unsaved-changes prompt. The clicked tab is explicit even when another document is active.
+fn tab_context_items(index: usize, count: usize) -> [(&'static str, &'static str, serde_json::Value, bool); 3] {
+    [
+        ("Close", "file.close", json!({"document": index}), true),
+        ("Close Others", "file.closeOthers", json!({"document": index}), count > 1),
+        ("Close All", "file.closeAll", json!({}), true),
+    ]
+}
+
+fn tab_context_menu(ui: &mut egui::Ui, index: usize, count: usize) -> Option<(&'static str, serde_json::Value)> {
+    ui.set_min_width(170.0);
+    for (label, id, params, enabled) in tab_context_items(index, count) {
+        if ui.add_enabled(enabled, egui::Button::new(tl!(label))).clicked() {
+            ui.close();
+            return Some((id, params));
+        }
+    }
+    None
 }
 
 /// Apply tab-strip clicks: a document tab shows that document, an opening tab its progress, and
@@ -1051,6 +1095,8 @@ fn pro_tabs(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let t = crate::theme::Tokens::get(ui.ctx());
     let active = app.session.active_index().filter(|_| app.jobs.focus.is_none());
     let (mut activate, mut close) = (None, None);
+    let mut tab_action = None;
+    let tab_count = app.session.documents().len();
     let (strip, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 26.0), Sense::hover());
     ui.painter().rect_filled(strip, 0.0, t.tab_strip);
     let mut x = strip.left();
@@ -1083,6 +1129,9 @@ fn pro_tabs(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         } else if resp.clicked() {
             activate = Some(i);
         }
+        resp.context_menu(|ui| {
+            tab_action = tab_context_menu(ui, i, tab_count);
+        });
         x = r.right();
     }
     // Files opening in the background (#210): "name (Opening… 45%)" with a progress underline.
@@ -1114,6 +1163,12 @@ fn pro_tabs(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     open_tab_clicks(app, activate, focus_open, cancel_open);
     if let Some(i) = close {
         let _ = crate::menus::invoke(app, ui.ctx(), "file.close", json!({"document": i}));
+    }
+    if let Some((id, params)) = tab_action
+        && let Err(e) = crate::menus::invoke(app, ui.ctx(), id, params)
+    {
+        app.ui.status = e;
+        app.ui.status_error = true;
     }
 }
 
@@ -1443,7 +1498,14 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
             && let Some(p) = response.interact_pointer_pos()
         {
             let d = xf.to_doc(p);
+            app.ui.canvas_tool_menu = None;
             crate::layer_pick_ui::open(app, [p.x, p.y], d[0], d[1]);
+        }
+        if response.secondary_clicked()
+            && !crate::layer_pick_ui::is_gesture(tool, mods)
+            && let Some(p) = response.interact_pointer_pos()
+        {
+            crate::canvas_tool_menu::open(app, tool, [p.x, p.y]);
         }
         // The (temporary) Hand pans above; its gestures never reach the tool underneath.
         if tool == Tool::Hand {
@@ -1737,6 +1799,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
         draw_transform_controls(app, &painter, &xf);
         crate::paint_mouse::show_picker(app, &ctx);
         crate::layer_pick_ui::show(app, &ctx);
+        crate::canvas_tool_menu::show(app, &ctx);
         crate::snap_ui::draw(app, &painter, &xf);
         if border == photocraft_engine::prefs::CanvasBorder::Line {
             painter.rect_stroke(img_rect, 0.0, Stroke::new(1.0, Color32::from_gray(20)), egui::StrokeKind::Outside);
@@ -2080,7 +2143,16 @@ fn draw_drag_preview(app: &mut PhotocraftApp, painter: &egui::Painter, xf: &View
             };
             crate::tool_feedback::draw_ants(painter, &pts, true);
         }
-        Tool::Lasso => {
+        // Patch Tool dragging the patch: the selection outline follows the pointer.
+        Tool::Patch if crate::retouch_ui::patch_drags_selection(app, d.start, d.modifiers) => {
+            let start = d.start;
+            let [dx, dy] = crate::retouch_ui::patch_offset(app, start, last);
+            if let Some((_, _, segs)) = &app.outline_cache {
+                let moved: Vec<crate::outline::Segment> = segs.iter().map(|(a, b)| ([a[0] + dx, a[1] + dy], [b[0] + dx, b[1] + dy])).collect();
+                marching_ants_segments(painter, xf, &moved, painter.ctx().input(|i| i.time));
+            }
+        }
+        Tool::Lasso | Tool::Patch => {
             let pts: Vec<Pos2> = d.points.iter().map(|p| xf.to_screen(p[0] as f32, p[1] as f32)).collect();
             crate::tool_feedback::draw_ants(painter, &pts, false);
         }
@@ -2401,7 +2473,8 @@ fn finish_gesture(app: &mut PhotocraftApp, d: Drag) {
             let (aa, feather) = (app.ui.tool_options.anti_alias, app.ui.tool_options.feather);
             let _ = app.run("select.rect", json!({"x": x0, "y": y0, "width": x1 - x0, "height": y1 - y0, "mode": mode, "ellipse": d.tool == Tool::EllipseMarquee, "antiAlias": aa, "feather": feather}));
         }
-        Tool::Lasso => {
+        Tool::Patch if crate::retouch_ui::patch_drags_selection(app, d.start, d.modifiers) => crate::retouch_ui::finish_patch(app, d.start, [end[0], end[1]]),
+        Tool::Lasso | Tool::Patch => {
             let pts: Vec<[f64; 2]> = d.points.iter().map(|p| [p[0], p[1]]).collect();
             if pts.len() >= 3 {
                 let mode = selection_mode(app, d.modifiers);
@@ -2417,7 +2490,7 @@ fn finish_gesture(app: &mut PhotocraftApp, d: Drag) {
                 let bg = app.session.tools.background;
                 let _ = app.run(
                     "paint.gradient",
-                    json!({"from": [d.start[0], d.start[1]], "to": [end[0], end[1]], "style": o.gradient_style, "reverse": o.gradient_reverse, "dither": o.gradient_dither, "colors": [hex(fg), hex(bg)], "opacity": o.fill_opacity, "target": paint_target(app)}),
+                    json!({"from": [d.start[0], d.start[1]], "to": [end[0], end[1]], "style": o.gradient_style, "reverse": o.gradient_reverse, "dither": o.gradient_dither, "colors": [hex(fg), hex(bg)], "opacity": o.fill_opacity, "mode": o.gradient_blend_mode.label(), "target": paint_target(app)}),
                 );
             }
         }
@@ -2607,6 +2680,30 @@ mod tests {
         assert!(gpu.has_display_lut(key, 4));
         // The shared texture's key is the same for both displays.
         assert_eq!(texture_key(canvas_display(&app, &doc, Some(1)).0.as_deref()), texture_key(canvas_display(&app, &doc, Some(4)).0.as_deref()));
+    }
+
+    #[test]
+    fn tab_context_uses_clicked_document_and_existing_close_commands() {
+        let items = tab_context_items(2, 3);
+        assert_eq!(items.iter().map(|(_, id, _, _)| *id).collect::<Vec<_>>(), ["file.close", "file.closeOthers", "file.closeAll"]);
+        assert_eq!(items[0].2, json!({"document": 2}));
+        assert_eq!(items[1].2, json!({"document": 2}));
+        assert_eq!(items[2].2, json!({}));
+        assert!(!tab_context_items(0, 1)[1].3);
+        assert!(items.iter().all(|(_, id, _, _)| photocraft_engine::commands::find(id).is_some()));
+    }
+
+    #[test]
+    fn tab_close_others_prompts_for_unsaved_nonactive_document() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.run("file.new", json!({"width": 8, "height": 8, "name": "Keep"})).unwrap();
+        app.run("file.new", json!({"width": 8, "height": 8, "name": "Edited"})).unwrap();
+        app.run("edit.fill", json!({"color": "#ff0000"})).unwrap();
+        assert_eq!(app.session.active_index(), Some(1));
+        let (_, id, params, _) = tab_context_items(0, 2)[1].clone();
+        crate::menus::invoke(&mut app, &egui::Context::default(), id, params).unwrap();
+        assert!(app.discard.is_some(), "close others must ask before discarding the edited tab");
+        assert_eq!(app.session.documents().len(), 2);
     }
 
     #[test]

@@ -2108,8 +2108,6 @@
 
 	Rendering mode	Modo de renderizado
 	Freeze Lasso: drag to freeze an area, Alt-drag to thaw it (L)	Lazo de congelación: arrastre para congelar un área; Alt+arrastrar para descongelarla (L)
-<<<<<<< HEAD
-=======
 
 
 	Shadow Clipping Warning (U)	Aviso de recorte de sombras (U)
@@ -2143,4 +2141,3 @@ cameraRaw	Amount	Cantidad
 	Patch:	Parche:
 	Lasso around an area, then drag the selection	Rodee un área con el lazo y arrastre la selección
 	Edit Type	Editar texto
->>>>>>> upstream/main

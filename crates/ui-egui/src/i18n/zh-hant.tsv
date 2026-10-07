@@ -2016,8 +2016,6 @@
 
 	Rendering mode	渲染模式
 	Freeze Lasso: drag to freeze an area, Alt-drag to thaw it (L)	凍結套索：拖曳以凍結區域，按住 Alt 拖曳以解凍 (L)
-<<<<<<< HEAD
-=======
 
 	Shadow Clipping Warning (U)	陰影剪裁警告 (U)
 	Highlight Clipping Warning (O)	亮部剪裁警告 (O)
@@ -2044,4 +2042,3 @@ cameraRaw	Blending	混合
 	Patch:	修補：
 	Lasso around an area, then drag the selection	用套索圈出區域，然後拖曳選取範圍
 	Edit Type	編輯文字
->>>>>>> upstream/main

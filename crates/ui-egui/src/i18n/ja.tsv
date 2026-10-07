@@ -2024,8 +2024,6 @@
 
 	Rendering mode	レンダリングモード
 	Freeze Lasso: drag to freeze an area, Alt-drag to thaw it (L)	フリーズなげなわ：ドラッグで範囲をフリーズ、Alt+ドラッグで解凍 (L)
-<<<<<<< HEAD
-=======
 
 	Shadow Clipping Warning (U)	シャドウのクリッピング警告 (U)
 	Highlight Clipping Warning (O)	ハイライトのクリッピング警告 (O)
@@ -2049,4 +2047,3 @@ cameraRaw	Color	カラー
 	Patch:	パッチ:
 	Lasso around an area, then drag the selection	投げ縄で範囲を囲み、選択範囲をドラッグします
 	Edit Type	文字を編集
->>>>>>> upstream/main

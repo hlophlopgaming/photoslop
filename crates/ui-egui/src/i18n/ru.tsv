@@ -2302,8 +2302,6 @@
 
 	Rendering mode	Режим отрисовки
 	Freeze Lasso: drag to freeze an area, Alt-drag to thaw it (L)	Лассо заморозки: перетащите, чтобы заморозить область; Alt+перетаскивание размораживает (L)
-<<<<<<< HEAD
-=======
 
 	Shadow Clipping Warning (U)	Предупреждение о клиппинге теней (U)
 	Highlight Clipping Warning (O)	Предупреждение о клиппинге светов (O)
@@ -2343,4 +2341,3 @@ cameraRaw	Roughness	Неровность
 	Patch:	Заплатка:
 	Lasso around an area, then drag the selection	Обведите область лассо, затем перетащите выделение
 	Edit Type	Редактировать текст
->>>>>>> upstream/main

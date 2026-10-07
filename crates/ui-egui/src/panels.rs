@@ -24,7 +24,7 @@ const TOOL_SECTIONS: &[&[&[Tool]]] = &[
         &[Tool::Eyedropper, Tool::Ruler, Tool::Note, Tool::Count],
     ],
     &[
-        &[Tool::SpotHealing, Tool::Healing],
+        &[Tool::SpotHealing, Tool::Healing, Tool::Patch],
         &[Tool::Brush, Tool::Pencil, Tool::MixerBrush],
         &[Tool::CloneStamp],
         &[Tool::HistoryBrush],
@@ -644,6 +644,9 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                         }
                         ui.spacing_mut().item_spacing.x = 8.0;
                         widgets::vline(ui, 22.0);
+                        opt_label(ui, tl!("Mode"));
+                        let opts: Vec<(BlendMode, &str)> = BlendMode::LAYER_MODES.iter().map(|m| (*m, m.label())).collect();
+                        widgets::dropdown(ui, "gradient-blend-mode", &mut app.ui.tool_options.gradient_blend_mode, &opts, 96.0);
                         opt_label(ui, tl!("Opacity"));
                         widgets::value_field(ui, &mut app.ui.tool_options.fill_opacity, 1.0..=100.0, "%", 62.0);
                         widgets::checkbox(ui, &mut app.ui.tool_options.gradient_reverse, tl!("Reverse"));
@@ -2340,6 +2343,7 @@ fn effect_rows(app: &mut PhotocraftApp, ui: &mut egui::Ui, l: &Layer, depth: usi
             egui::FontId::proportional(11.5),
             if on { t.text_dim } else { t.text_faint },
         );
+        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name.clone()));
         if resp.double_clicked() {
             crate::layer_style::open(app, kind);
         }

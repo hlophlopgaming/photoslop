@@ -3754,6 +3754,7 @@ dependencies = [
  "egui_kittest",
  "log",
  "photocraft-algo",
+ "photocraft-cms",
  "photocraft-codecs",
  "photocraft-color",
  "photocraft-compose",

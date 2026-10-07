@@ -2034,8 +2034,6 @@
 
 	Rendering mode	Režim vykreslování
 	Freeze Lasso: drag to freeze an area, Alt-drag to thaw it (L)	Laso zmrazení: tažením zmrazíte oblast, tažením s klávesou Alt ji rozmrazíte (L)
-<<<<<<< HEAD
-=======
 
 	Shadow Clipping Warning (U)	Varování oříznutí stínů (U)
 	Highlight Clipping Warning (O)	Varování oříznutí světel (O)
@@ -2066,4 +2064,3 @@ cameraRaw	Color	Barvy
 	Patch:	Záplata:
 	Lasso around an area, then drag the selection	Obtáhněte oblast lasem a pak přetáhněte výběr
 	Edit Type	Upravit text
->>>>>>> upstream/main

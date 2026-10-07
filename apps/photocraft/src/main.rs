@@ -60,14 +60,11 @@ fn native_options() -> eframe::NativeOptions {
             .with_titlebar_shown(false)
             .with_title_shown(false),
         centered: true,
-<<<<<<< HEAD
-        // Keep pen/cursor feedback responsive instead of queueing two frames.
-        wgpu_options: eframe::egui_wgpu::WgpuConfiguration { surface: eframe::egui_wgpu::SurfaceConfig::LOW_LATENCY, ..Default::default() },
-=======
         // eframe saves native window geometry and egui panel/window sizes on exit.
         // Keep that state beside preferences, including config overrides and portable mode.
         persistence_path: services::config_dir().map(|dir| dir.join("ui.ron")),
->>>>>>> upstream/main
+        // Keep pen/cursor feedback responsive instead of queueing two frames.
+        wgpu_options: eframe::egui_wgpu::WgpuConfiguration { surface: eframe::egui_wgpu::SurfaceConfig::LOW_LATENCY, ..Default::default() },
         ..Default::default()
     }
 }
@@ -174,7 +171,8 @@ fn main() -> eframe::Result {
     // Brush presets load in the background; the app attaches them when they arrive.
     let presets = services::presets_dir().map(photocraft_engine::preset_store::open_dir_async);
     let mut options = native_options();
-<<<<<<< HEAD
+    // eframe restores the saved window layout before our code runs; drop values that would crash it.
+    ui_state::sanitize(options.persistence_path.as_deref());
     #[cfg(target_os = "linux")]
     if display.force_x11 {
         options.event_loop_builder = Some(Box::new(|builder: &mut eframe::EventLoopBuilder<eframe::UserEvent>| {
@@ -182,10 +180,6 @@ fn main() -> eframe::Result {
             builder.with_x11();
         }));
     }
-=======
-    // eframe restores the saved window layout before our code runs; drop values that would crash it.
-    ui_state::sanitize(options.persistence_path.as_deref());
->>>>>>> upstream/main
     // Crash-safe GPU startup (#4): pick the backend (a marker left by a start that died in the
     // driver moves to a safer one), and lock this start's marker until the first frames render.
     let t_sentinel = std::time::Instant::now();
@@ -367,10 +361,6 @@ fn main() -> eframe::Result {
 #[cfg(test)]
 mod tests {
     #[test]
-<<<<<<< HEAD
-    fn the_window_uses_low_latency_presentation() {
-        assert_eq!(super::native_options().wgpu_options.surface, eframe::egui_wgpu::SurfaceConfig::LOW_LATENCY);
-=======
     fn window_and_panel_geometry_survive_a_restart() {
         let options = super::native_options();
         assert!(options.persist_window);
@@ -406,7 +396,11 @@ mod tests {
         output.textures_delta.clear();
         let panel = egui::containers::panel::PanelState::load(&restored, egui::Id::new("dock")).unwrap();
         assert_eq!(panel.size().x, 410.0);
->>>>>>> upstream/main
+    }
+
+    #[test]
+    fn the_window_uses_low_latency_presentation() {
+        assert_eq!(super::native_options().wgpu_options.surface, eframe::egui_wgpu::SurfaceConfig::LOW_LATENCY);
     }
 
     #[test]
