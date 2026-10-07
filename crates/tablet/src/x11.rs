@@ -32,14 +32,7 @@ const ALL_DEVICES: u16 = 0;
 /// thread that calls `callback` with `Some(sample)` for pen events and `None` when another
 /// pointer moves. The thread ends when the X connection closes.
 pub fn spawn(display: Option<&str>, callback: impl Fn(Option<Sample>) + Send + 'static) -> Result<JoinHandle<()>, Error> {
-    let (conn, screen) = RustConnection::connect(display).map_err(|e| Error::Unsupported(format!("cannot connect to the X server: {e}")))?;
-    let root = conn.setup().roots.get(screen).map(|s| s.root).ok_or_else(|| Error::Platform(format!("X screen {screen} not found")))?;
-    // Raw events for everyone (not just the grabbing client) need XI 2.1; ask for 2.2.
-    let version =
-        conn.xinput_xi_query_version(2, 2).map_err(|e| Error::Platform(e.to_string()))?.reply().map_err(|e| Error::Unsupported(format!("no XInput2: {e}")))?;
-    if (version.major_version, version.minor_version) < (2, 1) {
-        return Err(Error::Unsupported(format!("XInput {}.{} (raw events need 2.1)", version.major_version, version.minor_version)));
-    }
+    let (conn, root) = connect(display)?;
     let mask = XIEventMask::RAW_MOTION | XIEventMask::RAW_BUTTON_PRESS | XIEventMask::RAW_BUTTON_RELEASE | XIEventMask::HIERARCHY | XIEventMask::DEVICE_CHANGED;
     conn.xinput_xi_select_events(root, &[xinput::EventMask { deviceid: ALL_DEVICES, mask: vec![mask] }])
         .map_err(|e| Error::Platform(e.to_string()))?
@@ -72,6 +65,30 @@ fn run(conn: &RustConnection, state: &mut State, callback: &dyn Fn(Option<Sample
             deliver(callback, sample);
         }
     }
+}
+
+/// The pen devices (tip, eraser, puck: slave pointers with a pressure valuator) the X server on
+/// `display` (`None` = `$DISPLAY`) reports right now. Under a Wayland compositor this is
+/// Xwayland, which creates "xwayland-tablet stylus/eraser/cursor" devices for the tablets the
+/// compositor offers it; an empty list means no tablet is visible to X clients.
+pub fn pen_devices(display: Option<&str>) -> Result<Vec<Device>, Error> {
+    let (conn, _) = connect(display)?;
+    let mut state = State::default();
+    state.set_devices(query_devices(&conn));
+    Ok(state.pens().cloned().collect())
+}
+
+/// Connect to `display` and check for XInput 2.1+ (raw events for every client need 2.1; we ask
+/// for 2.2). Returns the connection and the root window of its default screen.
+fn connect(display: Option<&str>) -> Result<(RustConnection, u32), Error> {
+    let (conn, screen) = RustConnection::connect(display).map_err(|e| Error::Unsupported(format!("cannot connect to the X server: {e}")))?;
+    let root = conn.setup().roots.get(screen).map(|s| s.root).ok_or_else(|| Error::Platform(format!("X screen {screen} not found")))?;
+    let version =
+        conn.xinput_xi_query_version(2, 2).map_err(|e| Error::Platform(e.to_string()))?.reply().map_err(|e| Error::Unsupported(format!("no XInput2: {e}")))?;
+    if (version.major_version, version.minor_version) < (2, 1) {
+        return Err(Error::Unsupported(format!("XInput {}.{} (raw events need 2.1)", version.major_version, version.minor_version)));
+    }
+    Ok((conn, root))
 }
 
 /// The slave pointer devices with their pen valuators (empty on any error).

@@ -257,13 +257,13 @@ fn read_ldconfig() -> Option<String> {
     None
 }
 
-/// Run the check against this system. `Err` carries the message to print before exiting with a
-/// non-zero status; a warning is printed here and the app starts.
-pub fn preflight() -> Result<(), String> {
+/// Run the check for `session` (from [`session_from_env`], or X11 when the app moves the window
+/// to Xwayland, see `display_choice`) against this system. `Err` carries the message to print
+/// before exiting with a non-zero status; a warning is printed here and the app starts.
+pub fn preflight(session: DisplaySession) -> Result<(), String> {
     if std::env::var_os("PHOTOCRAFT_SKIP_LIB_CHECK").is_some_and(|v| !v.is_empty() && v != "0") {
         return Ok(());
     }
-    let session = session_from_env(|k| std::env::var(k).ok());
     if session == DisplaySession::None {
         return Ok(());
     }

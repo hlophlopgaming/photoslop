@@ -15,6 +15,10 @@
 //!   `wl_display` connection (the tablet events name winit's `wl_surface`), which needs
 //!   `unsafe` foreign-display interop, and binding it makes compositors stop emulating the
 //!   pointer for the pen, so pen motion would have to be re-injected into egui as well.
+//!   Worse, since Plasma 6.3 KWin no longer emulates the pointer for clients that don't bind the
+//!   tablet protocol, so a native Wayland window gets no pen input at all there. The desktop app
+//!   therefore runs under Xwayland when [`x11::pen_devices`] finds a tablet (Xwayland binds the
+//!   tablet protocol and turns it into the XInput2 devices read here).
 //!
 //! The platform glue only reads raw values and hands them to the pure mapping in [`appkit`] and
 //! [`xi`], which normalise, clamp and track pen state and are tested on every platform.

@@ -27,6 +27,9 @@ pub const MAX_AXES: usize = 64;
 /// Devices kept (hostile servers could report thousands).
 pub const MAX_DEVICES: usize = 256;
 
+/// Device name characters kept.
+pub const MAX_NAME_CHARS: usize = 128;
+
 /// Which pen axis a valuator carries.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum AxisKind {
@@ -88,6 +91,9 @@ impl Axis {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Device {
     pub id: u16,
+    /// The device name the X server reports ("Wacom Intuos Pro M Pen stylus",
+    /// "xwayland-tablet stylus:12"), kept for diagnostics.
+    pub name: String,
     /// The eraser end of a pen.
     pub eraser: bool,
     /// Pen axes (other valuators are not kept).
@@ -104,7 +110,9 @@ impl Device {
             .filter_map(|(number, label, min, max)| Some(Axis { kind: AxisKind::from_label(&label)?, number, min, max }))
             .take(MAX_AXES)
             .collect();
-        Self { id, eraser: name.to_ascii_lowercase().contains("eraser"), axes }
+        // Names come from the X server: cap them so a hostile one can't balloon the log.
+        let name: String = name.chars().take(MAX_NAME_CHARS).collect();
+        Self { id, eraser: name.to_ascii_lowercase().contains("eraser"), name, axes }
     }
 
     /// A pen (tip or eraser): has a pressure axis.
@@ -139,6 +147,13 @@ impl State {
 
     pub fn device(&self, id: u16) -> Option<&Device> {
         self.devices.get(&id)
+    }
+
+    /// The pen devices (tip, eraser, puck) currently known, by id.
+    pub fn pens(&self) -> impl Iterator<Item = &Device> {
+        let mut pens: Vec<&Device> = self.devices.values().filter(|d| d.is_tablet()).collect();
+        pens.sort_by_key(|d| d.id);
+        pens.into_iter()
     }
 
     /// A raw motion / button event from slave device `id` with its changed valuators.
@@ -250,6 +265,58 @@ mod tests {
         // A mouse moving means mouse; a master or unknown id changes nothing.
         assert_eq!(st.handle(12, [(0, 3.0)]), Update::Set(None));
         assert_eq!(st.handle(2, [(2, 3.0)]), Update::Keep);
+    }
+
+    /// The layout Xwayland gives the tablet tools it creates for a Wayland compositor's tablet
+    /// (`hw/xwayland/xwayland-input.c`, `xwl_tablet_proc`): X/Y 0..262143, pressure 0..65535,
+    /// tilt in degrees -64..63, and rotation or the airbrush slider on "Abs Wheel".
+    fn xwayland(id: u16, name: &str) -> Device {
+        Device::new(
+            id,
+            name,
+            [
+                (0, "Abs X".to_string(), 0.0, 262143.0),
+                (1, "Abs Y".to_string(), 0.0, 262143.0),
+                (2, "Abs Pressure".to_string(), 0.0, 65535.0),
+                (3, "Abs Tilt X".to_string(), -64.0, 63.0),
+                (4, "Abs Tilt Y".to_string(), -64.0, 63.0),
+                (5, "Abs Wheel".to_string(), -900.0, 899.0),
+            ],
+        )
+    }
+
+    #[test]
+    fn xwayland_tablet_tools_are_pens() {
+        let mut st = State::default();
+        let relative = Device::new(8, "xwayland-relative-pointer:16", [(0, "Rel X".to_string(), -1.0, -1.0), (1, "Rel Y".to_string(), -1.0, -1.0)]);
+        let pointer = Device::new(7, "xwayland-pointer:16", [(0, "Abs X".to_string(), 0.0, 1.0), (1, "Abs Y".to_string(), 0.0, 1.0)]);
+        st.set_devices([
+            pointer,
+            relative,
+            xwayland(9, "xwayland-tablet stylus:16"),
+            xwayland(10, "xwayland-tablet eraser:16"),
+            xwayland(11, "xwayland-tablet cursor:16"),
+        ]);
+        let pens: Vec<_> = st.pens().map(|d| (d.id, d.name.as_str(), d.eraser)).collect();
+        assert_eq!(pens, vec![(9, "xwayland-tablet stylus:16", false), (10, "xwayland-tablet eraser:16", true), (11, "xwayland-tablet cursor:16", false)]);
+        // Hovering (Xwayland sends pressure 0 between frames), then the tip down at half pressure.
+        let s = sample(st.handle(9, [(0, 1000.0), (1, 2000.0), (2, 0.0), (3, 12.0), (4, -7.0), (5, 0.0)]));
+        assert_eq!((s.pressure, s.tilt_x, s.tilt_y, s.eraser), (0.0, 12.0, -7.0, false));
+        let s = sample(st.handle(9, [(0, 1001.0), (1, 2001.0), (2, 32767.5), (3, 12.0), (4, -7.0), (5, 0.0)]));
+        assert_eq!(s.pressure, 0.5);
+        // Xwayland's ButtonPress carries no valuators: the last pressure stays.
+        assert_eq!(sample(st.handle(9, [])).pressure, 0.5);
+        // The eraser tool is its own device.
+        assert!(sample(st.handle(10, [(2, 65535.0)])).eraser);
+        // The emulated pointers mean a mouse.
+        assert_eq!(st.handle(7, [(0, 0.5)]), Update::Set(None));
+        assert_eq!(st.handle(8, [(0, 3.0)]), Update::Set(None));
+    }
+
+    #[test]
+    fn long_device_names_are_capped() {
+        let d = Device::new(1, &"é".repeat(10_000), []);
+        assert_eq!(d.name.chars().count(), MAX_NAME_CHARS);
     }
 
     #[test]
